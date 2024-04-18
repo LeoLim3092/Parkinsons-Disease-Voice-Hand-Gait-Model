@@ -2,6 +2,8 @@ import numpy as np
 import subprocess
 import soundfile as sf
 import os
+import json
+import numpy as np
 import pysptk
 
 
@@ -14,7 +16,7 @@ def convert_to_wav(input_file):
 
     return output_file
 
-
+"""
 def buffer(X, n, p=0, opt=None):
     '''Mimic MATLAB routine to generate buffer array
 
@@ -37,7 +39,6 @@ def buffer(X, n, p=0, opt=None):
     result : (n,n) ndarray
         Buffer array created from X
     '''
-    import numpy as np
 
     if opt not in [None, 'nodelay']:
         raise ValueError('{} not implemented'.format(opt))
@@ -73,6 +74,48 @@ def buffer(X, n, p=0, opt=None):
         result = np.hstack([result, np.expand_dims(col, axis=0).T])
 
     return result
+"""
+
+def buffer(signal, frame_length, overlap=0, initial_condition=None):
+    """
+    Generate a buffer array similar to MATLAB's buffer function, creating overlapping frames from the signal.
+    
+    Parameters:
+    - signal: ndarray, the input signal array.
+    - frame_length: int, number of data points in each frame.
+    - overlap: int, number of data points to overlap between frames.
+    - initial_condition: str, handling of the initial condition ('nodelay' or None).
+      'nodelay' starts filling the buffer immediately without initial zeros.
+    
+    Returns:
+    - buffer_array: ndarray, the buffer array created from the input signal.
+    """
+    
+    if initial_condition not in [None, 'nodelay']:
+        raise ValueError(f"Initial condition '{initial_condition}' is not implemented.")
+    
+    signal_length = len(signal)
+    step = frame_length - overlap
+    first_iter = True
+    buffer_list = []
+
+    for start in range(0, signal_length, step):
+        end = start + frame_length
+        if first_iter:
+            if initial_condition == 'nodelay':
+                frame = signal[start:end]
+            else:
+                frame = np.hstack([np.zeros(overlap), signal[start:end-overlap]])
+            first_iter = False
+        else:
+            frame = signal[start-overlap:end] if end <= signal_length else signal[start-overlap:]
+            if len(frame) < frame_length:
+                frame = np.hstack([frame, np.zeros(frame_length - len(frame))])
+        
+        buffer_list.append(frame)
+    
+    buffer_array = np.column_stack(buffer_list)
+    return buffer_array
 
 
 def audio_feature(waveFile):
@@ -150,6 +193,68 @@ def audio_feature(waveFile):
     return volume, pause, pause_percentage, volumn_change
 
 
+def new_audio_feature(audio_file_path):
+    """
+    Calculate volume, pause duration, pause percentage, and volume change of an audio file.
+    
+    Parameters:
+    - audio_file_path: Path to the audio file.
+    
+    Returns:
+    - volume: Average volume of the audio.
+    - total_pause_duration: Total duration of pauses in seconds.
+    - pause_percentage: Percentage of the audio duration that is silent.
+    - volume_change_percentage: Percentage change in volume between the first and second half of the audio.
+    """
+    frame_size = 11025
+    overlap = 0  # Set overlap to 0 or adjust as needed
+    audio_data, sample_rate = sf.read(audio_file_path)
+    
+    # Use the refactored buffer function for creating frames
+    frames = buffer(audio_data, frame_size, overlap)
+    num_frames = frames.shape[1]
+    volume_per_frame = np.sum(np.abs(frames - np.mean(frames, axis=0)), axis=0)
+
+    for i, frame in enumerate(frames):
+        frame = frame - np.mean(frame)  # Zero-justification
+
+    def volume_band_filter(volume_per_frame, low, high=None):
+        volume_per_frame = volume_per_frame[1:-1]
+        filtered = volume_per_frame[(volume_per_frame > low)]
+        if low and high:
+            average_volume = np.mean(volume_per_frame[(volume_per_frame > low) & (volume_per_frame < high)])
+        else:
+            average_volume = np.mean(filtered)
+
+        return average_volume, filtered
+
+    [lower_threshold, upper_threshold] = [35, 300]
+    threshold_adjustments = [(60, 45, 25, None), (45, -np.inf, 20, None)]
+    for max_vol, min_vol, new_lower_threshold, new_upper_threshold in threshold_adjustments:
+        average_volume, _ = volume_band_filter(volume_per_frame, lower_threshold, upper_threshold)
+        if min_vol < average_volume < max_vol:
+            lower_threshold = new_lower_threshold
+            upper_threshold = new_upper_threshold
+
+    # print(lower_threshold, upper_threshold)
+    average_volume, valid_volumes = volume_band_filter(volume_per_frame, lower_threshold, upper_threshold)
+    pause_count = num_frames - len(valid_volumes) - 2 
+    # print(pause_count)
+
+    total_pause_duration = pause_count * 0.25 #(frame_size / sample_rate)
+    pause_percentage = (pause_count / len(audio_data) * 25 * sample_rate)  # / num_frames) * 100
+
+    # Calculate volume change between the first and second half
+    # half = round(num_frames / 2)
+    first_half = volume_per_frame[3:round(num_frames / 2)]
+    second_half = volume_per_frame[round(num_frames / 2+1):-1]
+    average_volume_first_half = np.mean(first_half[(first_half > lower_threshold)])
+    average_volume_second_half = np.mean(second_half[(second_half > lower_threshold)])
+    volume_change_percentage = ((average_volume_second_half - average_volume_first_half) / average_volume) * 100
+
+    return average_volume, total_pause_duration, pause_percentage, volume_change_percentage
+
+
 def pitch(x, fs, method='NCF', winLength=400, overlapLength=200):
     frame_length = winLength
     hop_length = frame_length - overlapLength
@@ -222,6 +327,7 @@ def pitch_feature(waveFile):
     change = 0
     changenum = 0
 
+    # print('orginal: ', f0)
     for i in range(1, len(f0)):
         if (f0[i] >= 60) and (f0[i] <= 270):
             p += f0[i]
@@ -233,6 +339,9 @@ def pitch_feature(waveFile):
             f0[i] = np.nan
 
     if p / pitchnum > 180:
+        # print('old: ', p / pitchnum)
+        # print(f0)
+        # print('150, 250')
         p = 0
         pitchnum = 0
         change = 0
@@ -247,6 +356,9 @@ def pitch_feature(waveFile):
             else:
                 f0[i] = float('nan')
     elif 140 < p / pitchnum < 180:
+        # print('old: ', p / pitchnum)
+        # print(f0)
+        # print('100, 230')
         p = 0
         pitchnum = 0
         change = 0
@@ -261,6 +373,9 @@ def pitch_feature(waveFile):
             else:
                 f0[i] = float('nan')
     else:
+        # print('old: ', p / pitchnum)
+        # print(f0)
+        # print('70, 180')
         p = 0
         pitchnum = 0
         change = 0
@@ -274,12 +389,66 @@ def pitch_feature(waveFile):
                     changenum += 1
             else:
                 f0[i] = float('nan')
-
+    # print('old:', change, ' ',changenum)
     average_vol = ave / aveNum
     pitch_change = change / changenum
     average_pitch = p / pitchnum
 
     return average_vol, pitch_change, average_pitch
+
+def calculate_pitch_features(audio_file):
+    audio_data, sample_rate = sf.read(audio_file)
+    audio_data = np.where(np.abs(audio_data) > 0.2, 0, audio_data)
+    window_length, overlap_length = round(sample_rate / 10), 0
+
+    fundamental_frequency = pitch(audio_data, sample_rate, method='NCF', 
+                                  winLength=window_length, overlapLength=overlap_length)
+    frame_matrix = buffer(audio_data, window_length, overlap_length)
+    num_frames = frame_matrix.shape[1]
+
+    # Simplifying volume calculation
+    frame_volumes = np.sum(np.abs(frame_matrix - np.mean(frame_matrix, axis=0)), axis=0)
+
+    def volume_band_filter(frame_volumes, low, high=None):
+        frame_volumes = frame_volumes[1:-1]
+        filtered = frame_volumes[(frame_volumes > low)]
+        if low and high:
+            average_volume = np.mean(frame_volumes[(frame_volumes > low) & (frame_volumes < high)])
+        else:
+            average_volume = np.mean(filtered)
+
+        return average_volume
+
+    [lower_threshold, upper_threshold] = [25, None]
+    threshold_adjustments = [(50, 35, 17, 300), (35, -np.inf, 11, None)]
+    for max_vol, min_vol, new_lower_threshold, new_upper_threshold in threshold_adjustments:
+        average_volume = volume_band_filter(frame_volumes, lower_threshold, upper_threshold)
+        if min_vol < average_volume < max_vol:
+            lower_threshold = new_lower_threshold
+            upper_threshold = new_upper_threshold
+
+    average_volume = volume_band_filter(frame_volumes, lower_threshold, upper_threshold)
+
+    fundamental_frequency[frame_volumes < lower_threshold] = np.nan
+    def pitch_band_filter(fundamental_frequency, low, high):
+        fundamental_frequency[(fundamental_frequency <= low) | (fundamental_frequency >= high)] = np.nan
+        average_pitch = np.mean(fundamental_frequency[~np.isnan(fundamental_frequency)])
+        fundamental_difference = np.abs(np.diff(fundamental_frequency))
+        # print('new:', np.sum(np.abs(fundamental_difference[(~np.isnan(fundamental_difference))])), ' ',len(fundamental_difference[(~np.isnan(fundamental_difference))]))
+        pitch_differece = np.mean(np.abs(fundamental_difference[(~np.isnan(fundamental_difference))]))
+        return average_pitch, pitch_differece
+
+    [lower_threshold, upper_threshold] = [60, 270]
+    average_pitch, pitch_differece = pitch_band_filter(fundamental_frequency, lower_threshold, upper_threshold)
+    threshold_adjustments = [(180, np.inf, 150, 250), (140, 180, 100, 230), (-np.inf, 140, 70, 180)]
+    for min_pitch, max_pitch, new_lower_threshold, new_upper_threshold in threshold_adjustments:
+        if min_pitch < average_pitch < max_pitch:
+            lower_threshold = new_lower_threshold
+            upper_threshold = new_upper_threshold
+
+    average_pitch, pitch_differece = pitch_band_filter(fundamental_frequency, lower_threshold, upper_threshold)
+
+    return average_volume, pitch_differece, average_pitch
 
 
 def voice_features_extraction(voice_file):
@@ -332,3 +501,72 @@ def sound_checking(voice_file):
         average_vol = calculate_average_volume(wave_file)
 
     return duration, average_vol, failed_process
+
+if __name__ == '__main__':
+
+    data_dir = '../PD/AudioKoreaDrKim/'
+
+    with open('../metadata.json', 'r') as f:
+        patient_dict = json.load(f)
+
+    def data_to_path(data):
+        paths = []
+        prefix = '{}/{}/{}-{}-{}-{}-{}-'.format(data_dir, pat, pat.split(' ')[0], data['ord'], data['age'], data['gender'], data['date'])
+        for rec in data['recordings']:
+            paths.append(prefix+rec.split(':')[0])
+
+        return paths
+
+    for pat, val in patient_dict.items():
+        paths = data_to_path(val)
+        print(pat)
+        for path in paths:
+            volume, pause, pause_percentage, volumn_change = audio_feature(path)
+            average_vol, pitch_change, average_pitch = pitch_feature(path)
+
+            new_volume, new_pause, new_pause_percentage, new_volumn_change = new_audio_feature(path)
+            new_average_vol, new_pc, new_ap = calculate_pitch_features(path)
+            if ~np.isclose(volume, new_volume):
+                print('Exception: volume on ', path, volume, ' ', new_volume)
+            if ~np.isclose(pause, new_pause):
+                print('Exception: pause on ', path, pause, ' ', new_pause)     
+            if ~np.isclose(pause_percentage, new_pause_percentage):
+                print('Exception: pause_percentage on ', path, pause_percentage, ' ', new_pause_percentage)     
+            if ~np.isclose(volumn_change, new_volumn_change):
+                print('Exception: volumn_change on ', path, volumn_change, ' ', new_volumn_change)     
+            if ~np.isclose(average_vol, new_average_vol):
+                print('Exception: average_vol on ', path, average_vol, ' ', new_average_vol)     
+            if ~np.isclose(pitch_change, new_pc):
+                print('Exception: pitch_change on ', path, pitch_change, ' ', new_pc)     
+            if ~np.isclose(average_pitch, new_ap):
+                print('Exception: average_pitch on ', path, average_pitch, ' ', new_ap) 
+            print('-'*20)                      
+            
+
+    voice_file = '../PD/AudioKoreaDrKim/1-001/1-001-LBU-70-M-20220704-PD_014.wav'
+    # [pause_percentage, volumn_change, pitch_change, average_pitch] = voice_features_extraction(voice_path)
+
+    wave_file = f"{voice_file[:-4]}.wav"
+
+    if os.path.isfile(wave_file):
+        pass
+    else:
+        wave_file = convert_to_wav(voice_file)
+
+
+    volume, pause, pause_percentage, volumn_change = audio_feature(wave_file)
+    average_vol, pitch_change, average_pitch = pitch_feature(wave_file)
+
+    new_volume, new_pause, new_pause_percentage, new_volumn_change = new_audio_feature(wave_file)
+    new_average_vol, new_pc, new_ap = calculate_pitch_features(wave_file)
+
+    # print('volume:', volume)
+    # print('pause:', pause)
+    # print('pause percentage: ', pause_percentage)
+    # print('volume change: ', volumn_change)
+    # print('-'*20)
+    # print('average volume: ',  average_vol)
+    # print('pitch change: ', pitch_change)
+    # print('average pitch: ', average_pitch)
+
+    
