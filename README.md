@@ -1,10 +1,11 @@
-# Create Virtual environment
+# Parkinsons Disease: Voice, Hand, and Gait Models
+## Create virtual environment
 1. Install conda and create conda environment 
 	conda create -n "pdmodel" python=3.8
 2. run conda environment
 	conda activate pdmodel
 
-# Install package
+## Install package
 - install lastest visual studio (for window only) https://visualstudio.microsoft.com/downloads/
 - pip install -r ./requirement.txt
 - install pytorch
@@ -16,10 +17,10 @@
 	- mim install "mmdet==2.28.1"
 	- mim install mmpose==0.29.0 --user
 
-# Settings
+## Settings
 - Update new trained models in the Pre-trained models folder with all folds models
 
-# Features
+## Features
 - Voice features extraction
 	- voiceFeatureExtraction.py
 - Hand features extraction
