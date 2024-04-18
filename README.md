@@ -27,4 +27,4 @@
 - Gait features extraction
 	- gaitFeatureExtraction.py
 - Deploy trained model prediction
-	- depolyModel.py
+	- deployModel.py
