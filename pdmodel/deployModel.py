@@ -1,6 +1,6 @@
-from .gaitExtraction import gait_extraction, gait_checking
-from .handExtraction import hand_extraction, hand_checking
-from .voiceFeatureExtraction import voice_features_extraction, sound_checking
+from gaitExtraction import gait_extraction, gait_checking
+from handExtraction import hand_extraction, hand_checking
+from voiceFeatureExtraction import voice_features_extraction, sound_checking
 from . import handFeaturesExtraction
 from . import gaitFeaturesExtraction
 import os
@@ -9,6 +9,7 @@ import joblib
 import numpy as np
 import matplotlib.pyplot as plt
 import settings
+import asyncio
 
 
 model_paths = settings.MODEL_PATHS
