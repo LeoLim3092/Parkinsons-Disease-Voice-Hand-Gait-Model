@@ -1,0 +1,16 @@
+idna==3.4
+Markdown==3.4.1
+PyJWT==2.5.0
+pytz==2022.1
+requests==2.28.1
+sqlparse==0.4.2
+tzdata==2022.1
+urllib3==1.26.13
+opencv-python==4.7.0.68
+einops==0.6.0
+timm==0.6.12
+mediapipe==0.9.2.1
+joblib==1.0.1
+soundfile==0.12.1
+pysptk==0.2.0
+scikit-learn==1.1.1
