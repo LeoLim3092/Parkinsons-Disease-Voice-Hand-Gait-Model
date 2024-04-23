@@ -273,7 +273,7 @@ def new_audio_feature_without_filter(audio_file_path):
     second_half = np.mean(volume_per_frame[half:])
     volume_change_percentage = (first_half - second_half) / average_volume * 100
 
-    pause_threshold = 10 #volume threshold for determine pause
+    pause_threshold = np.min(volume_per_frame) * 3 #volume threshold for determine pause
     pause_frames = volume_per_frame[(volume_per_frame < pause_threshold)]
     pause_percentage = (num_frames - len(pause_frames)) / num_frames
 
