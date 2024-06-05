@@ -16,6 +16,9 @@
 	- mim install mmcv-full==1.7.0
 	- mim install "mmdet==2.28.1"
 	- mim install mmpose==0.29.0 --user
+ - Download checkpoints from google drive and copy it into checkpoints folder
+   	- [link](https://drive.google.com/drive/folders/1-t5fXd-pe2c48fQHrZJpapY9H0K5WUvs?usp=sharing)
+   	- path: /pdmodel/checkpoint/
 
 ## Settings
 - Update new trained models in the Pre-trained models folder with all folds models
