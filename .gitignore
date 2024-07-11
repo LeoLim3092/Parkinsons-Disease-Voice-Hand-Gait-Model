@@ -1,3 +1,5 @@
 .DS_Store
 pd_model.egg-info/
+pdmodel.egg-info/
 .idea/
+.vs/
