@@ -96,21 +96,9 @@ def predict_models(all_features_pth, age, gender, out_dir):
         all_result[k] = np.average(np.array([[gait_result[k]], [hand_result[k]],
                                              [voice_result[k]]]), weights=weight, axis=0)[0]
 
-    # plot results
     results = np.array([gait_result["SVM"][0], hand_result["SVM"][0], voice_result["SVM"][0],
                         all_result["SVM"][0]]) * 100
 
-    # plt.bar(["Gait", "Hand", "Voice", "All"], results)
-    #
-    # for i, r in enumerate(results):
-    #     plt.text(i - 0.2, 105, f"{r:.2f}%")
-    #
-    # for i, s in enumerate(["Gait", "Hand", "Voice", "All"]):
-    #     plt.text(i - 0.2, 115, f"{s}")
-    #
-    # plt.ylim([0, 120])
-    # plt.axis("off")
-    # plt.savefig(f"{out_dir}result.png")
 
     return results
 
