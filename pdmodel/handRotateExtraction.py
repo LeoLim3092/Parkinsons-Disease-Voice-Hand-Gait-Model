@@ -39,7 +39,7 @@ def sobel_variance(image):
     
     return np.var(sobel_magnitude[sobel_magnitude != 0])
 
-def get_edge_frequency_and_time(video_path):
+def get_edge_frequency_and_time_and_clarity(video_path):
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         print("Error: Could not open video.")
@@ -66,8 +66,9 @@ def get_edge_frequency_and_time(video_path):
     cap.release()
     
     period, acf_result = find_period(non_zero_var)
+    wave_clarity = clarity(non_zero_var)
     
-    return 1.0 / period, total_sobel_time
+    return 1.0 / period, total_sobel_time, wave_clarity
 
 def clarity(wave):
     try:
@@ -90,20 +91,6 @@ def clarity(wave):
     except:
         return np.nan
 
-def update_csv(video_name, new_psnr_time, new_ssim_time, csv_file):
-    df = pd.read_csv(csv_file)
-    
-    row_index = df.index[df['video_name'] == video_name].tolist()
-    
-    if row_index:
-        df.loc[row_index, 'total_psnr_time'] = new_psnr_time
-        df.loc[row_index, 'total_ssim_time'] = new_ssim_time
-        
-        df.to_csv(csv_file, index=False)
-        print(f'Updated total_psnr_time and total_ssim_time for video_name: {video_name}')
-    else:
-        print(f'Video name {video_name} not found in CSV file.')
-
 # dates = "20200521"
 dates = """
 20200429  20200521  20200611  20200707  20200716  20200730  20200818  20200915
@@ -114,7 +101,7 @@ dates = """
 
 date_list = [f"{date}" for date in dates.split() if date]
 
-csv_path = 'edge_clarity.csv'
+csv_path = 'edge_freq_time_clarity.csv'
 df = pd.read_csv(csv_path)
 
 for date in date_list:
@@ -125,13 +112,12 @@ for date in date_list:
     for video_name in video_names:
         video_path = f"/HDD3/PD_Data/TW/PD_Data_Hand/{date}/{video_name}"
         # psnr_freq, ssim_freq, total_psnr_time, total_ssim_time = get_winer_frequency_and_time(video_path=video_path)
-        edge_detect_freq, edge_detect_time = get_edge_frequency_and_time(video_path)
+        edge_detect_freq, edge_detect_time, edge_detect_clarity = get_edge_frequency_and_time_and_clarity(video_path)
         # new_row = {'video_name': video_name, 'winer_psnr_freq': psnr_freq, 'winer_ssim_freq': ssim_freq, 
         #            'total_psnr_time' : total_psnr_time, 'total_ssim_time' : total_ssim_time,
         #            'edge_detect_freq' : edge_detect_freq, 'edge_detect_time' : edge_detect_time}
         
-        new_row = {'video_name': video_name, 'edge_detect_freq' : edge_detect_freq, 'edge_detect_time' : edge_detect_time}
+        new_row = {'video_name': video_name, 'edge_detect_freq' : edge_detect_freq, 'edge_detect_time' : edge_detect_time, 'edge_detect_clarity' : edge_detect_clarity}
         df = df.append(new_row, ignore_index=True)
         
         df.to_csv(csv_path, index=False)
-        
