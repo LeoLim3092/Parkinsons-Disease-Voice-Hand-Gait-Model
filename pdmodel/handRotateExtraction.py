@@ -1,4 +1,5 @@
 import os
+from matplotlib import pyplot as plt
 import pandas as pd
 import cv2
 import numpy as np
@@ -66,7 +67,7 @@ def get_edge_frequency_and_time_and_clarity(video_path):
     cap.release()
     
     period, acf_result = find_period(non_zero_var)
-    wave_clarity = clarity(non_zero_var)
+    wave_clarity = clarity2(non_zero_var)
     
     return 1.0 / period, total_sobel_time, wave_clarity
 
@@ -90,6 +91,49 @@ def clarity(wave):
         
     except:
         return np.nan
+    
+def clarity2(wave, vis=False):
+    try:
+        # Calculate the mean of the waveform
+        mean = np.mean(wave)
+        
+        # Calculate the autocorrelation of the waveform after subtracting the mean
+        gacr = np.correlate(wave - mean, wave - mean, mode='full')
+        gacr = gacr[len(gacr) // 2:]  # Keep the second half of the autocorrelation
+        
+        # Smoothing the autocorrelation using a convolution
+        N = 10
+        gacr = np.convolve(gacr, np.ones(N) / N, mode='valid')  
+        
+        # Find peaks in the smoothed autocorrelation
+        peak_id, _ = find_peaks(gacr, height=np.mean(gacr))
+        peaks = gacr[peak_id]
+        
+        # Determine new peak locations based on the conditions
+        if len(peaks) > 1:
+            if peaks[0] > peaks[1]:
+                new_peaks_id, _ = find_peaks(gacr, height=np.mean(gacr), distance=peak_id[0] * 0.3)
+            else:
+                new_peaks_id, _ = find_peaks(gacr, height=np.mean(gacr), distance=peak_id[np.argmax(peaks[:3])] * 0.3)
+        else:
+            new_peaks_id = peak_id
+            
+        new_peaks = gacr[new_peaks_id]
+
+        if vis:
+            print(new_peaks_id)
+            plt.plot(gacr)
+            for p, v in zip(new_peaks_id, new_peaks):
+                plt.plot(p, v, 'r+')
+            plt.show()
+            
+        # Return the clarity metric
+        return (gacr[new_peaks_id[0]] / gacr[0])
+            
+    except Exception as e:
+        # Return NaN in case of any exception
+        print(f"An error occurred: {e}")
+        return 0
 
 # dates = "20200521"
 dates = """
