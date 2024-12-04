@@ -4,3 +4,4 @@ pdmodel.egg-info/
 __pycache__/
 .idea/
 .vs/
+*.csv
