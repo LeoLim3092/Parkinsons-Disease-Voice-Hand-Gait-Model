@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+venv/
+.env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+
+# Checkpoints / large model files
+pdmodel/checkpoint/
+*.pth
+*.bin
+*.ckpt
+*.pt
+
