@@ -1,6 +1,6 @@
 # Parkinson's Disease: Voice, Hand, and Gait Models
 
-Multimodal feature extraction and RF-based PD screening from voice, hand-tapping video, and gait video. This repository is aligned with the production API in [`pd-api-Mirlab-server`](https://github.com/LeoLim3092/Parkinsons-Disease-Voice-Hand-Gait-Model) (`api/pdModel`).
+Multimodal feature extraction and RF-based PD screening from voice, hand-tapping video, and gait video. 
 
 ## Recent changes (API sync)
 
@@ -242,17 +242,6 @@ This module does **not** retrain the RF models — only post-hoc probability cal
 
 ---
 
-## Sync from API server
-
-After updating `pd-api-Mirlab-server/api/pdModel`:
-
-```bash
-py -3 sync_from_api_pdmodel.py
-```
-
-Review diffs, then re-apply any local-only path tweaks in `settings.py` / `gaitExtraction.py` if needed.
-
----
 
 ## Install as package
 
