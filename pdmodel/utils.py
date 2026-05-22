@@ -1,5 +1,6 @@
-from scipy.signal import find_peaks, correlate
+from scipy.signal import find_peaks, correlate, stft
 import numpy as np
+import matplotlib.pyplot as plt
 import math
 
 
@@ -8,16 +9,89 @@ def autocorr(x):
     return result[int(result.size / 2):]
 
 
-def find_period(arr):
+def find_period(arr, debug=False):
+
+    if debug:
+        print("=" * 60)
+        print("[find_period] Start")
+        print(f"    input type : {type(arr)}")
+        try:
+            print(f"    input len  : {len(arr)}")
+        except:
+            print("    input len  : not available")
+
+    # =========================================================
+    # 1. Remove mean
+    # =========================================================
     mean = np.mean(arr)
 
-    acf_result = autocorr(arr - mean)
-    peaks, _ = find_peaks(acf_result)
+    if debug:
+        print("\n[STEP 1] Remove mean")
+        print(f"    mean value: {mean}")
 
-    if peaks[0] > 50:
+    centered = arr - mean
+
+    # =========================================================
+    # 2. Compute autocorrelation
+    # =========================================================
+    if debug:
+        print("\n[STEP 2] Compute autocorrelation")
+
+    acf_result = autocorr(centered)
+
+    if debug:
+        try:
+            print(f"    acf_result len : {len(acf_result)}")
+            preview_n = min(10, len(acf_result))
+            print(f"    first {preview_n} acf values: {acf_result[:preview_n]}")
+        except:
+            pass
+
+    # =========================================================
+    # 3. Detect peaks in ACF
+    # =========================================================
+    if debug:
+        print("\n[STEP 3] Find peaks in autocorrelation")
+
+    peaks, properties = find_peaks(acf_result)
+
+    if debug:
+        print(f"    peaks found: {len(peaks)}")
+        print(f"    peak indices: {peaks}")
+
+    # =========================================================
+    # 4. Determine period
+    # =========================================================
+    if debug:
+        print("\n[STEP 4] Determine period")
+
+    if len(peaks) == 0:
+        period = 1
+        if debug:
+            print("    WARNING: no peaks found -> default period = 1")
+
+    elif len(peaks) == 1:
         period = peaks[0]
+        if debug:
+            print("    only one peak found")
+            print(f"    period = {period}")
+
     else:
-        period = peaks[1]
+        if peaks[0] > 50:
+            period = peaks[0]
+            if debug:
+                print("    using peaks[0] (>50)")
+        else:
+            period = peaks[1]
+            if debug:
+                print("    peaks[0] too small -> using peaks[1]")
+
+        if debug:
+            print(f"    selected period: {period}")
+
+    if debug:
+        print("\n[find_period] Finished")
+        print("=" * 60)
 
     return period, acf_result
 
@@ -148,12 +222,92 @@ def clarity(wave):
         gacr = np.convolve(gacr, np.ones(N) / N, mode='valid')
         peak_id, _ = find_peaks(gacr, height=np.mean(gacr))
         peaks = gacr[peak_id]
+        
         if peaks[0] > peaks[1]:
             new_peaks_id, _ = find_peaks(gacr, height=np.mean(gacr), distance=peak_id[0] * 0.3)
         else:
             new_peaks_id, _ = find_peaks(gacr, height=np.mean(gacr), distance=peak_id[np.argmax(peaks[:3])] * 0.3)
 
         new_peaks = gacr[new_peaks_id]
+        
         return gacr[new_peaks_id[0]] / np.max(gacr[:new_peaks_id[0]])
+        
     except:
         return np.nan
+
+
+def clarity2(wave, vis=False):
+    try:
+        # Calculate the mean of the waveform
+        mean = np.mean(wave)
+        
+        # Calculate the autocorrelation of the waveform after subtracting the mean
+        gacr = np.correlate(wave - mean, wave - mean, mode='full')
+        gacr = gacr[len(gacr) // 2:]  # Keep the second half of the autocorrelation
+        
+        # Smoothing the autocorrelation using a convolution
+        N = 10
+        gacr = np.convolve(gacr, np.ones(N) / N, mode='valid')  
+        
+        # Find peaks in the smoothed autocorrelation
+        peak_id, _ = find_peaks(gacr, height=np.mean(gacr))
+        peaks = gacr[peak_id]
+        
+        # Determine new peak locations based on the conditions
+        if len(peaks) > 1:
+            if peaks[0] > peaks[1]:
+                new_peaks_id, _ = find_peaks(gacr, height=np.mean(gacr), distance=peak_id[0] * 0.3)
+            else:
+                new_peaks_id, _ = find_peaks(gacr, height=np.mean(gacr), distance=peak_id[np.argmax(peaks[:3])] * 0.3)
+        else:
+            new_peaks_id = peak_id
+            
+        new_peaks = gacr[new_peaks_id]
+
+        if vis:
+            print(new_peaks_id)
+            plt.plot(gacr)
+            for p, v in zip(new_peaks_id, new_peaks):
+                plt.plot(p, v, 'r+')
+            plt.show()
+            
+        # Return the clarity metric
+        return (gacr[new_peaks_id[0]] / gacr[0])
+            
+    except Exception as e:
+        # Return NaN in case of any exception
+        print(f"An error occurred: {e}")
+        return 0
+
+
+def get_freq_inten(arr, fs=30, nperseg=300):
+
+    # Perform STFT
+    f, t, Zxx = stft(arr, fs=fs, nperseg=nperseg)
+    
+    # Determine midpoint in time for the first half of the signal
+    mid_point = np.where(t >= t.max() / 2)[0][0]
+    
+    # Extract STFT data for the first half
+    Zxx_first_half = Zxx[:, :mid_point]
+    Zxx_last_half = Zxx[:, mid_point:]
+    
+    # Calculate magnitude
+    magnitude = np.abs(Zxx_first_half)
+    last_msg = np.abs(Zxx_last_half)
+    
+    # Calculate the weighted average frequency
+    _1st_half_average_frequency = np.mean(np.sum(magnitude * f[:, None], axis=0) / np.sum(magnitude, axis=0))
+    _last_half_average_frequency = np.mean(np.sum(last_msg * f[:, None], axis=0) / np.sum(last_msg, axis=0))
+    avr_frq = (_1st_half_average_frequency + _last_half_average_frequency)/2
+    frq_dff = _1st_half_average_frequency - _last_half_average_frequency
+    
+    # df, dt = f[1] - f[0], t[1] - t[0]
+    # e = sum(np.sum(Zxx.real**2 + Zxx.imag**2, axis=0) * df) * dt
+
+    T, _ = find_period(arr)
+    p, values = find_peaks(arr, height=np.mean(arr),
+                           distance=int(T * 0.4))
+    height = values["peak_heights"]
+
+    return avr_frq, np.mean(height), avr_frq*np.mean(height), frq_dff

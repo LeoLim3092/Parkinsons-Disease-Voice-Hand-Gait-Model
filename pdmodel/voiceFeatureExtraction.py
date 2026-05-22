@@ -3,13 +3,13 @@ import subprocess
 import soundfile as sf
 import os
 import pysptk
+from speechScoring import score_pronunciation
 
 
 def convert_to_wav(input_file):
     output_file = f'{input_file[:-4]}.wav'
 
     # Run the ffmpeg command as a subprocess
-    print(input_file, output_file)
     subprocess.run(["ffmpeg", "-i", input_file, output_file])
 
     return output_file
@@ -75,90 +75,165 @@ def buffer(X, n, p=0, opt=None):
     return result
 
 
-def audio_feature(waveFile):
-    frameSize = 11025
-    overlap = 0
+def audio_feature(waveFile, debug=False):
+    if debug:
+        print("=" * 60)
+        print("audio_feature() called")
+        print(f"waveFile: {waveFile}")
+
+    # --- Read audio file ---
     y, fs = sf.read(waveFile)
+    if debug:
+        print("\n[1] Audio loaded")
+        print(f"    sample rate (fs): {fs}")
+        print(f"    raw shape: {y.shape}")
+        print(f"    dtype: {y.dtype}")
 
+    # --- Frame settings ---
+    frameSize = int(0.025 * fs)   # 25 ms
+    overlap = frameSize // 2      # 50% overlap
+    if debug:
+        print("\n[2] Frame configuration")
+        print(f"    frameSize: {frameSize}")
+        print(f"    overlap: {overlap}")
+
+    # --- Normalize audio ---
+    max_abs = np.max(np.abs(y)) if len(y) > 0 else 0
+    if max_abs > 0:
+        y = y / max_abs
+    if debug:
+        print("\n[3] Audio normalization")
+        print(f"    max abs before normalization: {max_abs}")
+        print(f"    normalized: {max_abs > 0}")
+
+    # --- Convert stereo to mono if needed ---
+    if y.ndim > 1:
+        if debug:
+            print("\n[4] Convert to mono")
+            print(f"    original channels: {y.shape[1]}")
+        y = y.mean(axis=1)
+        if debug:
+            print(f"    new shape after mono conversion: {y.shape}")
+    else:
+        if debug:
+            print("\n[4] Convert to mono")
+            print("    already mono")
+
+    # --- Create frame matrix ---
     frameMat = buffer(y, frameSize, overlap)
-
     frameNum = frameMat.shape[1]
     volume1 = np.zeros(frameNum)
 
-    ave = 0
-    aveF = 0
-    aveB = 0
-    aveNum = 0
-    pauseNum = 0
-    aveFNum = 0
-    aveBNum = 0
-    bond = 35
+    if debug:
+        print("\n[5] Frame matrix")
+        print(f"    frameMat shape: {frameMat.shape}")
+        print(f"    frameNum: {frameNum}")
+
+    # --- Compute frame-wise volume ---
+    if debug:
+        print("\n[6] Compute frame-wise volume")
 
     for i in range(frameNum):
-        frame = frameMat[:, i]
-        frame = frame - np.mean(frame)  # zero-justified
-        volume1[i] = np.sum(np.abs(frame))  # method 1
+        frame = frameMat[:, i] - np.mean(frameMat[:, i])  # zero-mean
+        volume1[i] = np.sum(np.abs(frame))
 
-    for i in range(1, frameNum - 1):
-        if volume1[i] > bond:
-            if volume1[i] < 300:
-                ave += volume1[i]
-                aveNum += 1
+        if debug and (i < 5 or i == frameNum - 1):
+            print(f"    frame {i}: mean={np.mean(frameMat[:, i]):.6f}, volume={volume1[i]:.6f}")
+
+    if debug and frameNum > 5:
+        print("    ...")
+        print(f"    last frame {frameNum - 1}: volume={volume1[-1]:.6f}")
+
+    # --- Threshold ---
+    bond = 10
+    if debug:
+        print("\n[7] Threshold")
+        print(f"    bond: {bond}")
+
+    # --- Pause / Speech frame classification ---
+    ave = 0
+    aveNum = 0
+    pauseNum = 0
+
+    if debug:
+        print("\n[8] Pause / speech classification")
+
+    for idx, v in enumerate(volume1):
+        if v > bond:
+            ave += v
+            aveNum += 1
+            if debug and idx < 5:
+                print(f"    frame {idx}: speech (volume={v:.6f})")
         else:
             pauseNum += 1
+            if debug and idx < 5:
+                print(f"    frame {idx}: pause  (volume={v:.6f})")
 
-    if ave / (aveNum) < 60 and ave / (aveNum) > 45:
-        bond = 25
-        ave = 0
-        aveNum = 0
-        pauseNum = 0
-        for i in range(1, frameNum - 1):
-            if volume1[i] > bond:
-                ave += volume1[i]
-                aveNum += 1
-            else:
-                pauseNum += 1
+    volume = ave / aveNum if aveNum > 0 else 0
 
-    if ave / (aveNum) < 45:
-        bond = 20
-        ave = 0
-        aveNum = 0
-        pauseNum = 0
-        for i in range(1, frameNum - 1):
-            if volume1[i] > bond:
-                ave += volume1[i]
-                aveNum += 1
-            else:
-                pauseNum += 1
+    if debug:
+        print(f"    speech frames: {aveNum}")
+        print(f"    pause frames: {pauseNum}")
+        print(f"    accumulated speech volume: {ave:.6f}")
+        print(f"    average speech volume: {volume:.6f}")
 
-    pause = pauseNum * 0.25
-    pause_percentage = pauseNum * 25 * fs / len(y)
-    volume = ave / (aveNum)
+    # --- Pause duration ---
+    frame_hop = frameSize - overlap
+    frame_hop_duration = frame_hop / fs
+    pause = pauseNum * frame_hop_duration
 
-    for i in range(3, round(frameNum / 2)):
-        if volume1[i] > bond:
-            aveF += volume1[i]
-            aveFNum += 1
+    total_duration = len(y) / fs
+    pause_percentage = (pause / total_duration) * 100 if total_duration > 0 else 0
 
-    for i in range(round(frameNum / 2 + 1), frameNum - 1):
-        if volume1[i] > bond:
-            aveB += volume1[i]
-            aveBNum += 1
+    if debug:
+        print("\n[9] Pause statistics")
+        print(f"    frame_hop: {frame_hop}")
+        print(f"    frame_hop_duration: {frame_hop_duration:.6f} sec")
+        print(f"    pause duration: {pause:.6f} sec")
+        print(f"    total duration: {total_duration:.6f} sec")
+        print(f"    pause percentage: {pause_percentage:.2f}%")
 
-    volumn_change = (((aveB / aveBNum) - (aveF / aveFNum)) / (ave / aveNum)) * 100
+    # --- Volume change between first and second half ---
+    mid = frameNum // 2
+
+    first_half = volume1[3:mid]
+    second_half = volume1[mid+1:]
+
+    first_half_valid = first_half[first_half > bond]
+    second_half_valid = second_half[second_half > bond]
+
+    aveF = np.mean(first_half_valid) if len(first_half_valid) > 0 else 0
+    aveB = np.mean(second_half_valid) if len(second_half_valid) > 0 else 0
+    volumn_change = ((aveB - aveF) / volume * 100) if volume > 0 else 0
+
+    if debug:
+        print("\n[10] Volume change analysis")
+        print(f"    mid frame index: {mid}")
+        print(f"    first half valid frames: {len(first_half_valid)}")
+        print(f"    second half valid frames: {len(second_half_valid)}")
+        print(f"    aveF: {aveF:.6f}")
+        print(f"    aveB: {aveB:.6f}")
+        print(f"    volumn_change: {volumn_change:.2f}%")
+
+    if debug:
+        print("\n[11] Final output")
+        print(f"    volume = {volume:.6f}")
+        print(f"    pause = {pause:.6f}")
+        print(f"    pause_percentage = {pause_percentage:.2f}")
+        print(f"    volumn_change = {volumn_change:.2f}")
+        print("=" * 60)
 
     return volume, pause, pause_percentage, volumn_change
 
 
-def pitch(x, fs, method='NCF', winLength=400, overlapLength=200):
-    frame_length = winLength
-    hop_length = frame_length - overlapLength
 
-    # Pre-emphasis
+def pitch(x, fs, method='NCF', winLength=400, overlapLength=200):
+    hop_length = winLength - overlapLength
+
+    # Pre-emphasis filter
     preemph_coeff = 0.97
     x = np.append(x[0], x[1:] - preemph_coeff * x[:-1])
 
-    # Compute F0 using SPTK library
     if method == 'NCF':
         f0 = pysptk.swipe(x, fs=fs, hopsize=hop_length, min=60, max=400, threshold=0.25, otype="f0")
     elif method == 'ACF':
@@ -166,123 +241,171 @@ def pitch(x, fs, method='NCF', winLength=400, overlapLength=200):
     else:
         raise ValueError('Invalid method')
 
-    return np.array(f0)
+    return f0
+    
 
+import numpy as np
+import soundfile as sf
 
-def pitch_feature(waveFile):
+def pitch_feature(waveFile, debug=False):
+    if debug:
+        print("=" * 60)
+        print("pitch_feature() called")
+        print(f"waveFile: {waveFile}")
+
+    # --- Read audio file ---
     x, fs = sf.read(waveFile)
+    if debug:
+        print("\n[1] Audio loaded")
+        print(f"    sample rate (fs): {fs}")
+        print(f"    raw shape: {x.shape}")
+        print(f"    dtype: {x.dtype}")
+
+    # --- Convert stereo to mono if needed ---
+    if x.ndim > 1:
+        if debug:
+            print("\n[2] Convert to mono")
+            print(f"    original shape: {x.shape}")
+        x = x.mean(axis=1)
+        if debug:
+            print(f"    new shape after mono conversion: {x.shape}")
+    else:
+        if debug:
+            print("\n[2] Convert to mono")
+            print("    already mono")
+
+    # --- Optional noise clipping ---
+    if debug:
+        print("\n[3] Noise clipping")
+        print("    rule: abs(x) > 0.2 -> 0")
+        before_nonzero = np.count_nonzero(x)
+
     x = np.where(np.abs(x) > 0.2, 0, x)
 
-    # readtime = len(x)
-    winLength = round(fs / 10)
-    overlapLength = round(0 * fs)
+    if debug:
+        after_nonzero = np.count_nonzero(x)
+        print(f"    nonzero samples before: {before_nonzero}")
+        print(f"    nonzero samples after : {after_nonzero}")
 
+    # --- Frame parameters ---
+    winLength = int(0.025 * fs)      # 25 ms
+    overlapLength = int(0.015 * fs)  # as in your original code
+    if debug:
+        print("\n[4] Frame configuration")
+        print(f"    winLength: {winLength}")
+        print(f"    overlapLength: {overlapLength}")
+
+    # --- Pitch extraction ---
     f0 = pitch(x, fs, method='NCF', winLength=winLength, overlapLength=overlapLength)
 
+    if debug:
+        print("\n[5] Pitch extraction")
+        print(f"    f0 shape: {f0.shape}")
+        preview_n = min(10, len(f0))
+        print(f"    first {preview_n} f0 values: {f0[:preview_n]}")
+
+    # --- Compute volume envelope over same framing ---
     frameMat = buffer(x, winLength, overlapLength)
     frameNum = frameMat.shape[1]
     volume1 = np.zeros(frameNum)
-    ave = 0
-    aveNum = 0
-    bond = 25
+
+    if debug:
+        print("\n[6] Volume envelope framing")
+        print(f"    frameMat shape: {frameMat.shape}")
+        print(f"    frameNum: {frameNum}")
 
     for i in range(frameNum):
-        frame = frameMat[:, i]
-        frame = frame - np.mean(frame)  # zero-justified
-        volume1[i] = np.sum(np.abs(frame))  # method 1
+        frame = frameMat[:, i] - np.mean(frameMat[:, i])
+        volume1[i] = np.sum(np.abs(frame))
 
-    for i in range(1, frameNum - 1):
-        if volume1[i] > bond:
-            ave += volume1[i]
-            aveNum += 1
+        if debug and (i < 5 or i == frameNum - 1):
+            print(f"    frame {i}: mean={np.mean(frameMat[:, i]):.6f}, volume={volume1[i]:.6f}")
 
-    if (ave / aveNum < 50) and (ave / aveNum > 35):
-        bond = 17
-        ave = 0
-        aveNum = 0
+    if debug and frameNum > 5:
+        print("    ...")
+        print(f"    last frame {frameNum - 1}: volume={volume1[-1]:.6f}")
 
-        for i in range(1, frameNum - 1):
-            if (volume1[i] > bond) and (volume1[i] < 300):
-                ave += volume1[i]
-                aveNum += 1
+    # --- Threshold for pause/silence ---
+    bond = 10
+    valid_idx = volume1 > bond
 
-    if ave/aveNum < 35:
-        bond = 11
-        ave = 0
-        aveNum = 0
+    if debug:
+        print("\n[7] Silence / speech mask")
+        print(f"    bond: {bond}")
+        print(f"    valid speech-like frames: {np.sum(valid_idx)} / {len(valid_idx)}")
+        print(f"    silent/low-volume frames: {len(valid_idx) - np.sum(valid_idx)}")
 
-        for i in range(1, frameNum - 1):
-            if volume1[i] > bond:
-                ave += volume1[i]
-                aveNum += 1
+    # --- Align lengths if needed ---
+    min_len = min(len(f0), len(valid_idx))
+    if len(f0) != len(valid_idx) and debug:
+        print("\n[8] Length alignment")
+        print(f"    len(f0): {len(f0)}")
+        print(f"    len(valid_idx): {len(valid_idx)}")
+        print(f"    using min_len: {min_len}")
 
-    f0[volume1 < bond] = np.nan
-    p = 0
-    pitchnum = 0
-    change = 0
-    changenum = 0
+    f0 = f0[:min_len]
+    valid_idx = valid_idx[:min_len]
 
-    for i in range(1, len(f0)):
-        if (f0[i] >= 60) and (f0[i] <= 270):
-            p += f0[i]
-            pitchnum += 1
-            if (f0[i - 1] >= 60) and (f0[i - 1] <= 270):
-                change += np.abs(f0[i] - f0[i - 1])
-                changenum += 1
-        else:
-            f0[i] = np.nan
+    # --- Mask F0 values where volume is low ---
+    f0[~valid_idx] = np.nan
 
-    if p / pitchnum > 180:
-        p = 0
-        pitchnum = 0
-        change = 0
-        changenum = 0
-        for i in range(1, len(f0)):
-            if 150 <= f0[i] <= 250:
-                p += f0[i]
-                pitchnum += 1
-                if 150 <= f0[i - 1] <= 250:
-                    change += abs(f0[i] - f0[i - 1])
-                    changenum += 1
-            else:
-                f0[i] = float('nan')
-    elif 140 < p / pitchnum < 180:
-        p = 0
-        pitchnum = 0
-        change = 0
-        changenum = 0
-        for i in range(1, len(f0)):
-            if 100 <= f0[i] <= 230:
-                p += f0[i]
-                pitchnum += 1
-                if 100 <= f0[i - 1] <= 230:
-                    change += abs(f0[i] - f0[i - 1])
-                    changenum += 1
-            else:
-                f0[i] = float('nan')
+    if debug:
+        print("\n[9] Apply volume mask to f0")
+        nan_count = np.sum(np.isnan(f0))
+        print(f"    NaN count after masking: {nan_count}")
+        preview_n = min(10, len(f0))
+        print(f"    first {preview_n} masked f0 values: {f0[:preview_n]}")
+
+    # --- Clean F0 values ---
+    f0_clean = f0[~np.isnan(f0)]
+    f0_in_range = f0_clean[(f0_clean >= 70) & (f0_clean <= 270)]
+
+    if debug:
+        print("\n[10] Clean and filter pitch range")
+        print(f"    non-NaN f0 count: {len(f0_clean)}")
+        print(f"    in-range f0 count (70~270 Hz): {len(f0_in_range)}")
+        if len(f0_in_range) > 0:
+            preview_n = min(10, len(f0_in_range))
+            print(f"    first {preview_n} in-range f0 values: {f0_in_range[:preview_n]}")
+
+    # --- Pitch statistics ---
+    if len(f0_in_range) == 0:
+        average_pitch = 0
+        pitch_change = 0
+        if debug:
+            print("\n[11] Pitch statistics")
+            print("    no valid pitch values in range")
     else:
-        p = 0
-        pitchnum = 0
-        change = 0
-        changenum = 0
-        for i in range(1, len(f0)):
-            if 70 <= f0[i] <= 180:
-                p += f0[i]
-                pitchnum += 1
-                if 70 <= f0[i - 1] <= 180:
-                    change += abs(f0[i] - f0[i - 1])
-                    changenum += 1
-            else:
-                f0[i] = float('nan')
+        diffs = np.abs(np.diff(f0_in_range))
+        average_pitch = np.mean(f0_in_range)
+        pitch_change = np.mean(diffs) if len(diffs) > 0 else 0
 
-    average_vol = ave / aveNum
-    pitch_change = change / changenum
-    average_pitch = p / pitchnum
+        if debug:
+            print("\n[11] Pitch statistics")
+            print(f"    average_pitch: {average_pitch:.6f}")
+            print(f"    diff count: {len(diffs)}")
+            if len(diffs) > 0:
+                preview_n = min(10, len(diffs))
+                print(f"    first {preview_n} pitch diffs: {diffs[:preview_n]}")
+            print(f"    pitch_change: {pitch_change:.6f}")
+
+    # --- Average volume over valid frames ---
+    average_vol = np.mean(volume1[valid_idx]) if np.any(valid_idx) else 0
+
+    if debug:
+        print("\n[12] Average volume")
+        print(f"    average_vol: {average_vol:.6f}")
+
+        print("\n[13] Final output")
+        print(f"    average_vol   = {average_vol:.6f}")
+        print(f"    pitch_change  = {pitch_change:.6f}")
+        print(f"    average_pitch = {average_pitch:.6f}")
+        print("=" * 60)
 
     return average_vol, pitch_change, average_pitch
 
 
-def voice_features_extraction(voice_file):
+def voice_features_extraction(voice_file, debug=False):
     wave_file = f"{voice_file[:-4]}.wav"
 
     if os.path.isfile(wave_file):
@@ -290,10 +413,13 @@ def voice_features_extraction(voice_file):
     else:
         wave_file = convert_to_wav(voice_file)
 
-    volume, pause, pause_percentage, volumn_change = audio_feature(wave_file)
-    average_vol, pitch_change, average_pitch = pitch_feature(wave_file)
+    volume, pause, pause_percentage, volumn_change = audio_feature(wave_file, debug=debug)
+    average_vol, pitch_change, average_pitch = pitch_feature(wave_file, debug=debug)
 
-    return [pause_percentage, volumn_change, pitch_change, average_pitch]
+    score = score_pronunciation(wave_file)
+    read_duration = calculate_duration(wave_file)
+
+    return [read_duration, score, pause_percentage, volumn_change, pitch_change, average_pitch]
 
 
 def calculate_average_volume(file_path):

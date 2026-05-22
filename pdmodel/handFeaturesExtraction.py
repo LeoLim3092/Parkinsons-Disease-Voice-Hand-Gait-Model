@@ -5,12 +5,8 @@ import numpy as np
 from scipy.signal import find_peaks
 import pandas as pd
 from itertools import combinations
-from .utils import find_period
-
-
-fps = 59
-shift = fps
-coverage = 0.5
+from utils import find_period
+from scipy.signal import stft
 
 
 def get_thumb_index_dis(hand_landmarks):
@@ -37,28 +33,168 @@ def get_thumb_pinky_dis(hand_landmarks):
     return hand_4_20_dis
 
 
-def extract_thumb_index_periods(hand_pose, ax=None, title=""):
+def extract_thumb_index_periods(hand_pose, ax=None, title="", fps=59, debug=False):
+    if debug:
+        print("=" * 70)
+        print("[extract_thumb_index_periods] Start")
+        print(f"    title: {title}")
+        print(f"    fps  : {fps}")
+        print(f"    hand_pose type: {type(hand_pose)}")
+        try:
+            print(f"    hand_pose shape: {hand_pose.shape}")
+        except Exception:
+            print("    hand_pose shape: not available")
+
+    # =========================================================
+    # 1. Compute thumb-index distance
+    # =========================================================
+    if debug:
+        print("\n[STEP 1] Compute thumb-index distance")
+
     hand_dis = get_thumb_index_dis(hand_pose)
     mean_hand_dis = np.mean(hand_dis)
-    hand_dis = hand_dis / hand_dis.max()
 
-    T, _ = find_period(hand_dis)
-    p, values = find_peaks(hand_dis, height=np.mean(hand_dis),
-                           distance=int(T * 0.4))
+    if debug:
+        print(f"    hand_dis type : {type(hand_dis)}")
+        try:
+            print(f"    hand_dis len  : {len(hand_dis)}")
+        except Exception:
+            print("    hand_dis len  : not available")
+        print(f"    mean_hand_dis : {mean_hand_dis}")
+        try:
+            preview_n = min(10, len(hand_dis))
+            print(f"    first {preview_n} hand_dis values: {hand_dis[:preview_n]}")
+        except Exception:
+            pass
 
-    if ax:
+    # =========================================================
+    # 2. Compute normalization factor
+    # =========================================================
+    if debug:
+        print("\n[STEP 2] Compute normalization factor")
+        print("    using distance between landmark 0 and 5")
+
+    norm_factor = np.mean(
+        np.linalg.norm(hand_pose[:, 0, :-1] - hand_pose[:, 5, :-1], axis=1)
+    )
+
+    if debug:
+        print(f"    norm_factor: {norm_factor}")
+
+    hand_dis = hand_dis / norm_factor if norm_factor > 0 else hand_dis
+
+    if debug:
+        print("    normalization applied" if norm_factor > 0 else "    normalization skipped (norm_factor <= 0)")
+        try:
+            preview_n = min(10, len(hand_dis))
+            print(f"    first {preview_n} normalized hand_dis values: {hand_dis[:preview_n]}")
+        except Exception:
+            pass
+
+    # =========================================================
+    # 3. Estimate period
+    # =========================================================
+    if debug:
+        print("\n[STEP 3] Estimate signal period with find_period()")
+
+    T, _ = find_period(hand_dis, debug=debug)
+
+    if debug:
+        print(f"    estimated period T: {T}")
+        try:
+            peak_distance = int(T * 0.4)
+            print(f"    peak minimum distance: {peak_distance}")
+        except Exception:
+            pass
+
+    # =========================================================
+    # 4. Find peaks
+    # =========================================================
+    if debug:
+        print("\n[STEP 4] Find peaks")
+
+    peak_height = np.mean(hand_dis)
+    peak_distance = max(1, int(T * 0.4))  # safer than allowing 0
+
+    p, values = find_peaks(
+        hand_dis,
+        height=peak_height,
+        distance=peak_distance
+    )
+
+    if debug:
+        print(f"    peak height threshold: {peak_height}")
+        print(f"    number of peaks found : {len(p)}")
+        print(f"    peak indices          : {p}")
+        if isinstance(values, dict):
+            print(f"    peak info keys        : {list(values.keys())}")
+            if "peak_heights" in values:
+                print(f"    peak heights          : {values['peak_heights']}")
+
+    # =========================================================
+    # 5. Plot if axis is provided
+    # =========================================================
+    if ax is not None:
+        if debug:
+            print("\n[STEP 5] Plot results on axis")
+
         ax.plot(hand_dis)
         ax.plot(p, np.array(hand_dis)[p], "x", ms=10)
         ax.set_xlabel("Frames")
         ax.set_ylabel("Relative thumb-index distance")
         ax.set_title(title)
 
-    return np.diff(p, prepend=0).mean() / fps, (
-                np.diff(p, prepend=0)[:4].mean() / fps - np.diff(p, prepend=0)[-5:].mean() / fps) / 2, mean_hand_dis
+    else:
+        if debug:
+            print("\n[STEP 5] Plot skipped (ax is None)")
+
+    # =========================================================
+    # 6. Compute temporal features
+    # =========================================================
+    if debug:
+        print("\n[STEP 6] Compute period-based features")
+
+    if len(p) == 0:
+        avg_period_sec = 0
+        decay_feature = 0
+
+        if debug:
+            print("    no peaks found -> avg_period_sec = 0, decay_feature = 0")
+
+    else:
+        peak_intervals = np.diff(p, prepend=0)
+
+        avg_period_sec = peak_intervals.mean() / fps if fps > 0 else 0
+
+        first_part = peak_intervals[:4]
+        last_part = peak_intervals[-5:]
+
+        first_mean = first_part.mean() / fps if len(first_part) > 0 and fps > 0 else 0
+        last_mean = last_part.mean() / fps if len(last_part) > 0 and fps > 0 else 0
+
+        decay_feature = (first_mean - last_mean) / 2
+
+        if debug:
+            print(f"    peak_intervals: {peak_intervals}")
+            print(f"    avg_period_sec: {avg_period_sec}")
+            print(f"    first_part    : {first_part}")
+            print(f"    last_part     : {last_part}")
+            print(f"    first_mean    : {first_mean}")
+            print(f"    last_mean     : {last_mean}")
+            print(f"    decay_feature : {decay_feature}")
+
+    if debug:
+        print("\n[STEP 7] Final output")
+        print(f"    avg_period_sec = {avg_period_sec}")
+        print(f"    decay_feature  = {decay_feature}")
+        print(f"    mean_hand_dis  = {mean_hand_dis}")
+        print("=" * 70)
+
+    return avg_period_sec, decay_feature, mean_hand_dis
 
 
 def preprocess_landmarks(dt):
-    hand_pose_arr = np.array(list(dt["landmarks"].values()))
+    hand_pose_arr = list(dt["landmarks"].values())
     hand_pose_ls = []
 
     for a, arr in enumerate(hand_pose_arr):
@@ -77,185 +213,230 @@ def preprocess_landmarks(dt):
     return hand_pose_arr
 
 
-# def extract_hand_turning(hand_pose, ax=None, title=""):
-#     output = []
-#     h_p = hand_pose[:, [8, 7], 0].sum(axis=1)
-#     T, _ = find_period(h_p)
-#     p, values = find_peaks(h_p, height=np.mean(h_p),
-#                            distance=int(T * 0.4))
-#
-#     if ax:
-#         ax.plot(h_p)
-#         ax.set_xlabel("Frame")
-#         ax.plot(p, np.array(h_p)[p], "x", ms=10)
-#         ax.set_ylabel("finger x-axis displacement")
-#         ax.set_title(title)
-#
-#     h, h_d = np.diff(p, prepend=0).mean() / fps, (
-#                 np.diff(p, prepend=0)[:4].mean() / fps - np.diff(p, prepend=0)[-5:].mean() / fps) / 2
-#     output.append(h)
-#     output.append(h_d)
-#
-#     return output
+def get_freq_inten(arr):
+
+    dis = get_thumb_index_dis(arr)
+    norm_factor = np.mean(np.linalg.norm(arr[:, 0, :-1] - arr[:, 5, :-1], axis=1))
+    dis = dis / norm_factor if norm_factor > 0 else dis
+    
+    # Perform STFT
+    fs = 30
+    f, t, Zxx = stft(dis, fs=fs, nperseg=300)
+    
+    # Determine midpoint in time for the first half of the signal
+    mid_point = np.where(t >= t.max() / 2)[0][0]
+    
+    # Extract STFT data for the first half
+    Zxx_first_half = Zxx[:, :mid_point]
+    Zxx_last_half = Zxx[:, mid_point:]
+    
+    # Calculate magnitude
+    magnitude = np.abs(Zxx_first_half)
+    last_msg = np.abs(Zxx_last_half)
+    
+    # Calculate the weighted average frequency
+    _1st_half_average_frequency = np.mean(np.sum(magnitude * f[:, None], axis=0) / np.sum(magnitude, axis=0))
+    _last_half_average_frequency = np.mean(np.sum(last_msg * f[:, None], axis=0) / np.sum(last_msg, axis=0))
+    avr_frq = (_1st_half_average_frequency + _last_half_average_frequency)/2
+    frq_dff = _1st_half_average_frequency - _last_half_average_frequency
+    
+    # df, dt = f[1] - f[0], t[1] - t[0]
+    # e = sum(np.sum(Zxx.real**2 + Zxx.imag**2, axis=0) * df) * dt
+
+    T, _ = find_period(dis)
+    p, values = find_peaks(dis, height=np.mean(dis),
+                           distance=int(T * 0.4))
+    height = values["peak_heights"]
+
+    return avr_frq, np.mean(height), avr_frq*np.mean(height), frq_dff
 
 
-# def extract_hand_turning_all(hand_pose, ax=None, title=""):
-#     output = []
-#
-#     for i in range(21):
-#         h_p = hand_pose[:, i, 0]
-#         T, _ = find_period(h_p)
-#         p, values = find_peaks(h_p, height=np.mean(h_p),
-#                                distance=int(T * 0.4))
-#
-#         if ax:
-#             ax.plot(h_p)
-#             ax.set_xlabel("Frame")
-#             ax.plot(p, np.array(h_p)[p], "x", ms=10)
-#             ax.set_ylabel("finger x-axis displacement")
-#             ax.set_title(title)
-#
-#         h, h_d = np.diff(p, prepend=0).mean() / fps, (
-#                     np.diff(p, prepend=0)[:4].mean() / fps - np.diff(p, prepend=0)[-5:].mean() / fps) / 2
-#         output.append(h)
-#         output.append(h_d)
-#
-#     return output
+def single_thumb_index_hand(r_path, l_path, out_dir, fps=59, debug=False):
+    if debug:
+        print("=" * 70)
+        print("[single_thumb_index_hand] Start")
+        print(f"    r_path : {r_path}")
+        print(f"    l_path : {l_path}")
+        print(f"    out_dir: {out_dir}")
+        print(f"    fps    : {fps}")
 
+    # =========================================================
+    # 1. Prepare output directory and figure
+    # =========================================================
+    os.makedirs(out_dir, exist_ok=True)
 
-# def extract_hand_turning_v_lm(hand_pose, ax=None, title="", lms=[4, 8, 16, 20], pick=4):
-#     output = []
-#     comb = combinations(lms, pick)
-#
-#     for i, c in enumerate(comb):
-#
-#         h_p = hand_pose[:, list(c), 0].sum(axis=1)
-#         T, _ = find_period(h_p)
-#         p, values = find_peaks(h_p, height=np.mean(h_p),
-#                                distance=int(T * 0.4))
-#
-#         if ax:
-#             ax.plot(h_p)
-#             ax.set_xlabel("Frame")
-#             ax.plot(p, np.array(h_p)[p], "x", ms=10)
-#             ax.set_ylabel("finger x-axis displacement")
-#             ax.set_title(title)
-#
-#         h, h_d = np.diff(p, prepend=0).mean() / fps, (
-#                     np.diff(p, prepend=0)[:4].mean() / fps - np.diff(p, prepend=0)[-5:].mean() / fps) / 2
-#         output.append(h)
-#         output.append(h_d)
-#
-#     return output, i
+    if debug:
+        print("\n[STEP 1] Create figure and output directory")
+        print(f"    ensured output directory exists: {out_dir}")
 
+    fig, ax = plt.subplots(2, 1, figsize=(20, 20))
 
-# def hand_feature_extraction(path_ls):
-#     date_ls = []
-#     pid_ls = []
-#     out_result = []
-#     all_hand_id = ["AR", "AL", "BR", "BL"]
-#     hand_id = ["Right", "Left"]
-#
-#     for e, path in enumerate(path_ls):
-#         date = path.split("_")[0]
-#         pid = path.split("_")[1]
-#         all_path = [f"../handOutput3/{date}_{pid}_{hid}_hand.txt" for hid in all_hand_id]
-#         fig, ax = plt.subplots(2, 2, figsize=(20, 20))
-#         out_ls = []
-#
-#         if pid[-1] in ["A", "a", "B", "b"]:
-#             dt = joblib.load(f"../handOutput3/{date}_{pid}_hand.txt")
-#             hand_pose_arr = preprocess_landmarks(dt)[:, 0, :, :]
-#             q = hand_pose_arr.shape[0] // 4
-#             t1 = q
-#             t2 = 2 * q
-#             t3 = 3 * q
-#
-#             try:
-#                 hf1 = list(extract_thumb_index_periods(hand_pose_arr[5 * 59:10 * 59, :, :], ax=ax[0, 0],
-#                                                        title=f"Thumb-index {hand_id[0]}"))
-#             except:
-#                 hf1 = (np.ones((3)) * np.nan).tolist()
-#             try:
-#                 hf2 = list(extract_thumb_index_periods(hand_pose_arr[15 * 59:20 * 59, :, :], ax=ax[0, 1],
-#                                                        title=f"Thumb-index {hand_id[1]}"))
-#             except:
-#                 hf2 = (np.ones((3)) * np.nan).tolist()
-#             try:
-#                 hf3 = list(extract_hand_turning(hand_pose_arr[t2 * 59:t2 + 5 * 59, :, :], ax=ax[1, 0],
-#                                                 title=f"Thumb-Hand_turning {hand_id[0]}"))
-#             except:
-#                 hf3 = (np.ones((2)) * np.nan).tolist()
-#             try:
-#                 hf4 = list(extract_hand_turning(hand_pose_arr[t3 * 59:t3 + 5 * 59, :, :], ax=ax[1, 1],
-#                                                 title=f"Thumb-Hand_turning {hand_id[1]}"))
-#             except:
-#                 hf4 = (np.ones((2)) * np.nan).tolist()
-#             ax[0, 0].text(0, 0.5, str(4 * q))
-#             out_ls = hf1 + hf2 + hf3 + hf4
-#
-#         else:
-#             for i, all_hand_path in enumerate(all_path):
-#                 if os.path.isfile(all_hand_path):
-#
-#                     dt = joblib.load(all_hand_path)
-#                     hand_pose_arr = preprocess_landmarks(dt)[:, 0, :, :]
-#
-#                     if i <= 1:
-#                         hf = extract_thumb_index_periods(hand_pose_arr, ax=ax[0, i], title=f"Thumb-index {hand_id[i]}")
-#                         out_ls += list(hf)
-#                     else:
-#                         hf = extract_hand_turning(hand_pose_arr, ax=ax[1, i % 2], title=f"Hand_turning {hand_id[i % 2]}")
-#                         out_ls += list(hf)
-#
-#                 else:
-#                     if i <= 1:
-#                         out_ls += (np.ones((3)) * np.nan).tolist()
-#                     else:
-#                         out_ls += (np.ones((2)) * np.nan).tolist()
-#
-#         out_result.append(out_ls)
-#         date_ls.append(date)
-#         pid_ls.append(pid)
-#
-#         plt.savefig(f"../handOutput3/outfig/{date}_{pid}.png")
-#         plt.close()
-#
-#         df = pd.DataFrame(
-#             np.concatenate([np.array(date_ls).reshape(-1, 1), np.array(pid_ls).reshape(-1, 1), np.array(out_result)],
-#                            axis=1))
-#
-#         col = df.columns.tolist()
-#         col[0] = "Date"
-#         col[1] = "PID"
-#
-#         df.columns = col
-#         df.Date = df.Date.apply(lambda x: f"{x[:4]}-{x[4:6]}-{x[-2:]}")
-#         df.PID = df.PID.astype(int)
-#
-#         return df
+    if debug:
+        print("    figure created successfully")
 
-
-def single_thumb_index_hand(r_path, l_path, out_dir):
-
-    # fig, ax = plt.subplots(2, 1, figsize=(20, 20))
+    # =========================================================
+    # 2. Load right-hand landmark data
+    # =========================================================
+    if debug:
+        print("\n[STEP 2] Load right-hand joblib data")
 
     r_dt = joblib.load(r_path)
-    right_hand_arr = preprocess_landmarks(r_dt)[:, 0, :, :]
-    r_hf = extract_thumb_index_periods(right_hand_arr, title=f"Thumb-index right hand")
 
-    # r_hf = extract_thumb_index_periods(right_hand_arr, ax=ax[0], title=f"Thumb-index right hand")
+    if debug:
+        print(f"    right raw type: {type(r_dt)}")
+
+    # =========================================================
+    # 3. Preprocess right-hand landmarks
+    # =========================================================
+    if debug:
+        print("\n[STEP 3] Preprocess right-hand landmarks")
+
+    right_preprocessed = preprocess_landmarks(r_dt)
+    right_hand_arr = right_preprocessed[:, 0, :, :]
+
+    if debug:
+        print(f"    right_preprocessed type : {type(right_preprocessed)}")
+        try:
+            print(f"    right_preprocessed shape: {right_preprocessed.shape}")
+        except Exception:
+            print("    right_preprocessed shape: not available")
+
+        print(f"    right_hand_arr type     : {type(right_hand_arr)}")
+        try:
+            print(f"    right_hand_arr shape    : {right_hand_arr.shape}")
+        except Exception:
+            print("    right_hand_arr shape    : not available")
+
+    # =========================================================
+    # 4. Extract right-hand thumb-index periods
+    # =========================================================
+    if debug:
+        print("\n[STEP 4] Extract right-hand thumb-index periods")
+
+    r_hf = extract_thumb_index_periods(
+        right_hand_arr,
+        ax=ax[0],
+        title="Thumb-index right hand",
+        fps=fps,
+        debug=debug
+    )
+
+    if debug:
+        print(f"    r_hf type: {type(r_hf)}")
+        try:
+            print(f"    r_hf len : {len(r_hf)}")
+            print(f"    r_hf vals: {list(r_hf)}")
+        except Exception:
+            print(f"    r_hf val : {r_hf}")
+
+    # =========================================================
+    # 5. Load left-hand landmark data
+    # =========================================================
+    if debug:
+        print("\n[STEP 5] Load left-hand joblib data")
 
     l_dt = joblib.load(l_path)
-    left_hand_arr = preprocess_landmarks(l_dt)[:, 0, :, :]
-    l_hf = extract_thumb_index_periods(left_hand_arr, title=f"Thumb-index left hand")
 
-    # l_hf = extract_thumb_index_periods(left_hand_arr, ax=ax[1], title=f"Thumb-index left hand")
+    if debug:
+        print(f"    left raw type: {type(l_dt)}")
 
-    # plt.savefig(f"{out_dir}vis_hand_features_extraction_.png")
-    # plt.close()
+    # =========================================================
+    # 6. Preprocess left-hand landmarks
+    # =========================================================
+    if debug:
+        print("\n[STEP 6] Preprocess left-hand landmarks")
 
-    return list(r_hf) + list(l_hf)
+    left_preprocessed = preprocess_landmarks(l_dt)
+    left_hand_arr = left_preprocessed[:, 0, :, :]
+
+    if debug:
+        print(f"    left_preprocessed type : {type(left_preprocessed)}")
+        try:
+            print(f"    left_preprocessed shape: {left_preprocessed.shape}")
+        except Exception:
+            print("    left_preprocessed shape: not available")
+
+        print(f"    left_hand_arr type     : {type(left_hand_arr)}")
+        try:
+            print(f"    left_hand_arr shape    : {left_hand_arr.shape}")
+        except Exception:
+            print("    left_hand_arr shape    : not available")
+
+    # =========================================================
+    # 7. Extract left-hand thumb-index periods
+    # =========================================================
+    if debug:
+        print("\n[STEP 7] Extract left-hand thumb-index periods")
+
+    l_hf = extract_thumb_index_periods(
+        left_hand_arr,
+        ax=ax[1],
+        title="Thumb-index left hand",
+        fps=fps,
+        debug=debug
+    )
+
+    if debug:
+        print(f"    l_hf type: {type(l_hf)}")
+        try:
+            print(f"    l_hf len : {len(l_hf)}")
+            print(f"    l_hf vals: {list(l_hf)}")
+        except Exception:
+            print(f"    l_hf val : {l_hf}")
+
+    # =========================================================
+    # 8. Save visualization
+    # =========================================================
+    save_fig_path = os.path.join(out_dir, "vis_hand_features_extraction_.png")
+
+    if debug:
+        print("\n[STEP 8] Save visualization figure")
+        print(f"    save_fig_path: {save_fig_path}")
+
+    plt.savefig(save_fig_path)
+    plt.close(fig)
+
+    if debug:
+        print("    figure saved and closed")
+
+    # =========================================================
+    # 9. Extract frequency / intensity features
+    # =========================================================
+    if debug:
+        print("\n[STEP 9] Extract frequency / intensity features")
+
+    l_hf2 = get_freq_inten(left_hand_arr)
+    r_hf2 = get_freq_inten(right_hand_arr)
+
+    if debug:
+        print(f"    l_hf2 type: {type(l_hf2)}")
+        try:
+            print(f"    l_hf2 len : {len(l_hf2)}")
+            print(f"    l_hf2 vals: {list(l_hf2)}")
+        except Exception:
+            print(f"    l_hf2 val : {l_hf2}")
+
+        print(f"    r_hf2 type: {type(r_hf2)}")
+        try:
+            print(f"    r_hf2 len : {len(r_hf2)}")
+            print(f"    r_hf2 vals: {list(r_hf2)}")
+        except Exception:
+            print(f"    r_hf2 val : {r_hf2}")
+
+    # =========================================================
+    # 10. Merge output
+    # =========================================================
+    output = list(r_hf) + list(r_hf2) + list(l_hf) + list(l_hf2)
+
+    if debug:
+        print("\n[STEP 10] Merge output features")
+        print(f"    output length: {len(output)}")
+        print(f"    output: {output}")
+
+        print("\n[single_thumb_index_hand] Finished")
+        print("=" * 70)
+
+    return output
 
 
 if __name__ == '__main__':

@@ -1,6 +1,6 @@
 import cv2 
 import numpy as np 
-from . import mysulplotter as plotter 
+import mysulplotter as plotter 
 import os
 from tqdm import tqdm
  

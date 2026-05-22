@@ -1,3 +1,4 @@
+import torch
 import sys
 import os.path as osp
 sys.path.insert(0, osp.dirname(osp.realpath(__file__)))
@@ -5,9 +6,8 @@ from tools.utils import get_path
 from common.model_poseformer import *
 from common.skeleton import Skeleton
 from common.generators import *
-from tools.preprocess import h36m_coco_format, revise_kpts
-from tools.inference import gen_pose
-import settings
+from tools.preprocess import load_kpts_json, h36m_coco_format, revise_kpts, revise_skes
+from tools.inference import gen_pose, gen_pose_test
 
 cur_dir, chk_root, data_root, lib_root, output_root = get_path(__file__)
 sys.path.pop(0)
@@ -24,7 +24,7 @@ width, height = (1920, 1080)
 
 
 def load_model_layer():
-    chk = settings.chk_pth
+    chk = '/home/pdapp/pd_api_server/api/pdModel/checkpoint/detected81f.bin'
 
     print('Loading model ...')
     model_pos = PoseTransformer(num_frame=81, num_joints=17, in_chans=2, embed_dim_ratio=32, depth=4,

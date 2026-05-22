@@ -19,7 +19,7 @@ def hand_extraction(path, visualize=True, out_video_root="", hand='right'):
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = int(cap.get(cv2.CAP_PROP_FPS))
-    print(fps)
+    print(f'fps:{fps}')
 
     if visualize:
         video_writer = cv2.VideoWriter(os.path.join(out_video_root, f'vis_{hand}_hand_{os.path.basename(path)}'),
@@ -78,7 +78,7 @@ def hand_extraction(path, visualize=True, out_video_root="", hand='right'):
         video_writer.release()
 
     cap.release()
-    joblib.dump(out_dt, f"{out_video_root}{hand}_hand_{os.path.basename(path)[:-4]}.txt")
+    joblib.dump(out_dt, f"{out_video_root}/{hand}_hand_{os.path.basename(path)[:-4]}.txt")
 
 
 def hand_checking(path):

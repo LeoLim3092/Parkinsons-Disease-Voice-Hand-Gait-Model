@@ -1,0 +1,3 @@
+# Optional dependencies (install when needed)
+-r requirements.txt
+shap>=0.41.0

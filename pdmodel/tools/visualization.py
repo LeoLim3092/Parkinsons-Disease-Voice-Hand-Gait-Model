@@ -3,7 +3,7 @@ from tqdm import tqdm
 import cv2
 import numpy as np
 
-import pdmodel.tools.mysulplotter as plotter
+import tools.mysulplotter as plotter
 import matplotlib.pyplot as plt
 
 colors = ['C0','C1','C2','C3','C4','C5','C6','C7','C8','C9']

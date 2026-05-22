@@ -4,7 +4,7 @@ import sys
 import os.path as osp
 
 
-pre_dir = osp.join(osp.dirname(osp.realpath(__file__)), '../..')
+pre_dir = osp.join(osp.dirname(osp.realpath(__file__)), '..')
 sys.path.insert(0, pre_dir)
 from common.camera import normalize_screen_coordinates, camera_to_world
 from common.generators import *

@@ -1,13 +1,15 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+import sys
+sys.path.append("/home/pdapp/pd_api_server/pdmodel/mmpose")
 import os
 import warnings
 import cv2
 import mmcv
 import copy
 import numpy as np
-from mmpose.apis import (inference_top_down_pose_model,
-                    init_pose_model, process_mmdet_results,
-                    vis_pose_result)
+from mmpose.apis import (collect_multi_frames, inference_top_down_pose_model,
+                         init_pose_model, process_mmdet_results,
+                         vis_pose_result)
 from mmpose.datasets import DatasetInfo
 
 try:
@@ -17,8 +19,7 @@ except (ImportError, ModuleNotFoundError):
     has_mmdet = False
 
 from .tools.utils import generate_2d_result
-from .gen_skes import generate_skeletons
-import settings
+from gen_skes import generate_skeletons
 
 
 def gait_extraction(video_path, out_video_root="", save_out_video=False):
@@ -31,18 +32,18 @@ def gait_extraction(video_path, out_video_root="", save_out_video=False):
     kpt_thr = 0.3
     bbox_thr = 0.3
     det_cat_id = 1
-    det_config = settings.det_config_pth
-    det_checkpoint = settings.det_checkpoint_pth
-    pose_config = settings.pose_config_pth
-    pose_checkpoint = settings.pose_checkpoint_pth
+    det_config = "/home/pdapp/pd_api_server/pdmodel/mmpose/demo/mmdetection_cfg/faster_rcnn_r50_fpn_coco.py"
+    det_checkpoint = "/home/pdapp/pd_api_server/pdmodel/mmpose/checkpoints/faster_rcnn_r50_fpn_1x_coco_20200130-047c8118.pth"
+    pose_config = "/home/pdapp/pd_api_server/pdmodel/mmpose/configs/wholebody/2d_kpt_sview_rgb_img/topdown_heatmap/coco-wholebody/hrnet_w48_coco_wholebody_384x288_dark_plus.py"
+    pose_checkpoint = "/home/pdapp/pd_api_server/pdmodel/mmpose/checkpoints/hrnet_w48_coco_wholebody_384x288_dark-f5726563_20200918.pth"
     pose_det_results_list = []
     person_results_list = []
     print('Initializing gait model...')
     # build the detection model from a config file and a checkpoint file
-    det_model = init_detector(det_config, det_checkpoint, device="cuda:0")
+    det_model = init_detector(det_config, det_checkpoint, device="cuda:1")
 
     # build the pose model from a config file and a checkpoint file
-    pose_model = init_pose_model(pose_config, pose_checkpoint, device="cuda:0")
+    pose_model = init_pose_model(pose_config, pose_checkpoint, device="cuda:1")
 
     dataset = pose_model.cfg.data['test']['type']
     # get datasetinfo
@@ -147,11 +148,11 @@ def gait_checking(video_path):
     Using mmdet to detect the human.
     """
     det_cat_id = 1
-    det_config = settings.det_config_pth
-    det_checkpoint = settings.det_checkpoint_pth
+    det_config = "/home/pdapp/pd_api_server/pdmodel/mmpose/demo/mmdetection_cfg/faster_rcnn_r50_fpn_coco.py"
+    det_checkpoint = "/home/pdapp/pd_api_server/pdmodel/mmpose/checkpoints/faster_rcnn_r50_fpn_1x_coco_20200130-047c8118.pth"
 
     # build the detection model from a config file and a checkpoint file
-    det_model = init_detector(det_config, det_checkpoint, device="cuda:0")
+    det_model = init_detector(det_config, det_checkpoint, device="cuda:1")
     # read video
     video = mmcv.VideoReader(video_path)
     fps = video.fps

@@ -1,0 +1,33 @@
+{
+  "metadata": {
+    "pd_file": "all_pd_questionale_20260326_proba.xlsx",
+    "elder_file": "elder_20260424_proba.xlsx",
+    "previous_test_file": null,
+    "sheet_name": 0,
+    "row_count": 463,
+    "models": [
+      "gait",
+      "voice",
+      "tapping",
+      "ensemble"
+    ]
+  },
+  "calibrators": {
+    "gait": {
+      "coef": 1.1020432400228448,
+      "intercept": -1.1562346672373367
+    },
+    "voice": {
+      "coef": 0.6306281524924405,
+      "intercept": -0.35238452877480975
+    },
+    "tapping": {
+      "coef": 0.2570609941659658,
+      "intercept": -0.1594048276873994
+    },
+    "ensemble": {
+      "coef": 1.571619851436879,
+      "intercept": -0.46168400385773994
+    }
+  }
+}

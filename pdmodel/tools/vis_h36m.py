@@ -3,9 +3,10 @@ matplotlib.use('Agg')
 
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, writers
+from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 import subprocess as sp
-from pdmodel.tools.color_edge import h36m_color_edge
+from tools.color_edge import h36m_color_edge
 
 
 def get_resolution(filename):
